@@ -1,39 +1,59 @@
+"""
+build_dataset.py — read .npy files, extract features, save X.npy / y.npy.
+
+No major logic changes here; the improvements come from simulate.py
+(harder signals) and features.py (richer feature set).
+"""
+
 import numpy as np
 import os
-from features import extract_features
+from features import extract_features, FEATURE_NAMES
 
-X = []
-y = []
+DATA_DIR   = "../data"
+SKIP_FILES = {"X.npy", "y.npy"}
 
-data_path = "../data"
 
-for file in os.listdir(data_path):
-    if not file.endswith(".npy"):
-        continue
+def build():
+    X, y = [], []
+    files_processed = 0
 
-    if file in ["X.npy", "y.npy"]:
-        continue
+    for fname in sorted(os.listdir(DATA_DIR)):
+        if not fname.endswith(".npy") or fname in SKIP_FILES:
+            continue
 
-    try:
-        data = np.load(os.path.join(data_path, file))
-    except:
-        print(f"Skipping bad file: {file}")
-        continue
+        path = os.path.join(DATA_DIR, fname)
+        try:
+            data = np.load(path)
+        except Exception as e:
+            print(f"  [SKIP] {fname}: {e}")
+            continue
 
-    feats = extract_features(data)
-    X.append(feats)
+        feats = extract_features(data)
+        X.append(feats)
 
-    if "signal" in file:
-        y.append("signal")
-    elif "noise" in file:
-        y.append("noise")
-    elif "multi" in file:
-        y.append("multi")
+        if   "signal" in fname: y.append("signal")
+        elif "noise"  in fname: y.append("noise")
+        elif "multi"  in fname: y.append("multi")
+        else:
+            print(f"  [SKIP] {fname}: unrecognised label prefix")
+            X.pop()
+            continue
 
-X = np.array(X)
-y = np.array(y)
+        files_processed += 1
 
-np.save("../data/X.npy", X)
-np.save("../data/y.npy", y)
+    X = np.array(X, dtype=np.float64)
+    y = np.array(y)
 
-print("Dataset created:", X.shape)
+    np.save(os.path.join(DATA_DIR, "X.npy"), X)
+    np.save(os.path.join(DATA_DIR, "y.npy"), y)
+
+    print(f"\nDataset created from {files_processed} files.")
+    print(f"  X shape : {X.shape}   ({X.shape[1]} features per sample)")
+    print(f"  y shape : {y.shape}")
+    print(f"  Classes : {dict(zip(*np.unique(y, return_counts=True)))}")
+    print(f"\nFeatures: {FEATURE_NAMES}")
+    return X, y
+
+
+if __name__ == "__main__":
+    build()
