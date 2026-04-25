@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RF Spectrum Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:       #080c0f;
+    --surface:  #0d1519;
+    --border:   #1a2830;
+    --signal:   #00ff88;
+    --noise:    #ffb800;
+    --multi:    #00aaff;
+    --danger:   #ff3d3d;
+    --dim:      #3a5060;
+    --text:     #c8dde8;
+    --text-dim: #4a6878;
+    --glow-g:   0 0 12px rgba(0,255,136,.35);
+    --glow-y:   0 0 12px rgba(255,184,0,.35);
+    --glow-b:   0 0 12px rgba(0,170,255,.35);
+    --mono:     'Share Tech Mono', monospace;
+    --sans:     'Barlow Condensed', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,.07) 2px, rgba(0,0,0,.07) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 14px;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    border: 2px solid var(--signal);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    box-shadow: var(--glow-g);
+    animation: pulse-ring 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%,100% { box-shadow: var(--glow-g); }
+    50%      { box-shadow: 0 0 24px rgba(0,255,136,.6); }
+  }
+
+  .logo-icon::after {
+    content: '';
+    width: 10px; height: 10px;
+    background: var(--signal);
+    border-radius: 50%;
+    box-shadow: var(--glow-g);
+  }
+
+  .logo-text h1 {
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--signal);
+    text-shadow: var(--glow-g);
+  }
+
+  .logo-text p {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .header-right {
+    display: flex; align-items: center; gap: 20px;
+  }
+
+  #conn-status {
+    font-family: var(--mono);
+    font-size: 11px;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background .3s, box-shadow .3s;
+  }
+  .dot.live { background: var(--signal); box-shadow: var(--glow-g); animation: blink 1s step-end infinite; }
+  .dot.dead { background: var(--danger); }
+  @keyframes blink { 50% { opacity: .3; } }
+
+  #mode-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .btn-reset {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 14px;
+    border: 1px solid var(--dim);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: all .2s;
+  }
+  .btn-reset:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* ── Layout ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 1px;
+    background: var(--border);
+    min-height: calc(100vh - 61px);
+  }
+
+  .panel {
+    background: var(--bg);
+    padding: 18px 20px;
+  }
+
+  .panel-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Sidebar stats ── */
+  .sidebar {
+    grid-row: 1 / span 3;
+    display: flex; flex-direction: column; gap: 1px;
+    background: var(--border);
+  }
+
+  .stat-block {
+    background: var(--bg);
+    padding: 18px 20px;
+  }
+
+  .big-stat {
+    font-family: var(--mono);
+    font-size: 42px;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--signal);
+    text-shadow: var(--glow-g);
+    transition: color .3s;
+  }
+
+  .big-stat.warn { color: var(--noise); text-shadow: var(--glow-y); }
+  .big-stat.bad  { color: var(--danger); text-shadow: 0 0 12px rgba(255,61,61,.4); }
+
+  .stat-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    letter-spacing: 1px;
+  }
+
+  /* accuracy bar */
+  .acc-bar-track {
+    height: 4px;
+    background: var(--border);
+    margin-top: 12px;
+    position: relative;
+  }
+  .acc-bar-fill {
+    height: 100%;
+    background: var(--signal);
+    box-shadow: var(--glow-g);
+    transition: width .5s ease, background .5s;
+    width: 0%;
+  }
+
+  /* class pills */
+  .class-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .class-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    width: 52px;
+  }
+
+  .class-bar-track { flex: 1; height: 8px; background: var(--border); }
+  .class-bar-fill  { height: 100%; transition: width .5s; }
+  .class-count { font-family: var(--mono); font-size: 11px; color: var(--text-dim); width: 30px; text-align: right; }
+
+  .sig-bar { background: var(--signal); box-shadow: var(--glow-g); }
+  .noi-bar { background: var(--noise);  box-shadow: var(--glow-y); }
+  .mul-bar { background: var(--multi);  box-shadow: var(--glow-b); }
+
+  /* ── Confusion matrix ── */
+  .cm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .cm-table th {
+    color: var(--text-dim);
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 4px 8px;
+    text-align: center;
+  }
+
+  .cm-table td {
+    text-align: center;
+    padding: 8px;
+    transition: background .4s, color .4s;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+
+  .cm-diag { color: var(--signal); }
+  .cm-off  { color: var(--danger); }
+  .cm-zero { color: var(--text-dim); }
+
+  /* ── Charts ── */
+  .chart-wrap {
+    position: relative;
+    height: 160px;
+  }
+
+  .chart-wrap-tall {
+    position: relative;
+    height: 220px;
+  }
+
+  /* ── Feed ── */
+  #feed {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 260px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .feed-row {
+    display: grid;
+    grid-template-columns: 40px 70px 80px 80px 60px 70px 1fr;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 6px;
+    background: var(--surface);
+    animation: slide-in .2s ease;
+    align-items: center;
+  }
+
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .feed-row.correct { border-left: 2px solid var(--signal); }
+  .feed-row.wrong   { border-left: 2px solid var(--danger); }
+
+  .feed-hdr {
+    display: grid;
+    grid-template-columns: 40px 70px 80px 80px 60px 70px 1fr;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    padding: 2px 6px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .sig  { color: var(--signal); }
+  .noi  { color: var(--noise); }
+  .mul  { color: var(--multi); }
+  .good { color: var(--signal); }
+  .bad  { color: var(--danger); }
+  .dim  { color: var(--text-dim); }
+
+  .conf-bar-inline {
+    height: 4px;
+    background: var(--border);
+    flex: 1;
+  }
+  .conf-fill { height: 100%; background: var(--multi); transition: width .3s; }
+
+  /* SNR indicator */
+  .snr-val {
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  /* bottom status bar */
+  footer {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 6px 24px;
+    display: flex;
+    gap: 24px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  footer span b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    <div class="logo-text">
+      <h1>SpectraWatch</h1>
+      <p>AI-BASED SPECTRUM MONITORING SYSTEM</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div id="conn-status"><div class="dot" id="dot"></div><span id="conn-text">CONNECTING</span></div>
+    <div id="mode-badge">MODE: —</div>
+    <button class="btn-reset" onclick="resetStats()">RESET</button>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- ── Sidebar ── -->
+  <div class="sidebar">
+
+    <div class="stat-block">
+      <div class="panel-label">Accuracy</div>
+      <div class="big-stat" id="acc-val">—</div>
+      <div class="stat-sub" id="acc-sub">0 / 0 predictions</div>
+      <div class="acc-bar-track"><div class="acc-bar-fill" id="acc-bar"></div></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="panel-label">Class Distribution</div>
+      <div class="class-row">
+        <span class="class-label sig">SIGNAL</span>
+        <div class="class-bar-track"><div class="class-bar-fill sig-bar" id="bar-signal" style="width:0%"></div></div>
+        <span class="class-count" id="cnt-signal">0</span>
+      </div>
+      <div class="class-row">
+        <span class="class-label noi">NOISE</span>
+        <div class="class-bar-track"><div class="class-bar-fill noi-bar" id="bar-noise" style="width:0%"></div></div>
+        <span class="class-count" id="cnt-noise">0</span>
+      </div>
+      <div class="class-row">
+        <span class="class-label mul">MULTI</span>
+        <div class="class-bar-track"><div class="class-bar-fill mul-bar" id="bar-multi" style="width:0%"></div></div>
+        <span class="class-count" id="cnt-multi">0</span>
+      </div>
+    </div>
+
+    <div class="stat-block">
+      <div class="panel-label">Confusion Matrix</div>
+      <table class="cm-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="sig">SIG</th>
+            <th class="noi">NOI</th>
+            <th class="mul">MUL</th>
+          </tr>
+        </thead>
+        <tbody id="cm-body">
+          <tr><td class="dim">sig</td><td class="cm-zero" id="cm-ss">0</td><td class="cm-zero" id="cm-sn">0</td><td class="cm-zero" id="cm-sm">0</td></tr>
+          <tr><td class="dim">noi</td><td class="cm-zero" id="cm-ns">0</td><td class="cm-zero" id="cm-nn">0</td><td class="cm-zero" id="cm-nm">0</td></tr>
+          <tr><td class="dim">mul</td><td class="cm-zero" id="cm-ms">0</td><td class="cm-zero" id="cm-mn">0</td><td class="cm-zero" id="cm-mm">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="stat-block">
+      <div class="panel-label">Live Metrics</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div class="stat-sub">AVG SNR</div>
+          <div style="font-family:var(--mono);font-size:22px;color:var(--multi)" id="snr-avg">—</div>
+        </div>
+        <div>
+          <div class="stat-sub">AVG CONF</div>
+          <div style="font-family:var(--mono);font-size:22px;color:var(--noise)" id="conf-avg">—</div>
+        </div>
+        <div>
+          <div class="stat-sub">LOW CONF</div>
+          <div style="font-family:var(--mono);font-size:22px;color:var(--danger)" id="low-conf">—</div>
+        </div>
+        <div>
+          <div class="stat-sub">TOTAL</div>
+          <div style="font-family:var(--mono);font-size:22px;color:var(--text)" id="total-cnt">0</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Main area ── -->
+
+  <!-- Accuracy over time -->
+  <div class="panel">
+    <div class="panel-label">Accuracy Over Time</div>
+    <div class="chart-wrap">
+      <canvas id="acc-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- SNR + Confidence -->
+  <div class="panel">
+    <div class="panel-label">SNR & Confidence Per Prediction</div>
+    <div class="chart-wrap">
+      <canvas id="snr-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Prediction feed -->
+  <div class="panel" style="grid-column: 2;">
+    <div class="panel-label">Live Prediction Feed</div>
+    <div class="feed-hdr">
+      <span>#</span><span>TRUE</span><span>PREDICTED</span><span>RESULT</span>
+      <span>CONF</span><span>SNR (dB)</span><span>CONFIDENCE BAR</span>
+    </div>
+    <div id="feed"></div>
+  </div>
+
+</div>
+
+<footer>
+  <span>ENDPOINT <b id="ft-url">localhost:5000</b></span>
+  <span>SSE SUBSCRIBERS <b id="ft-subs">—</b></span>
+  <span>LAST UPDATE <b id="ft-time">—</b></span>
+  <span>© RF MONITOR — SDR-FREE SIMULATION MODE</span>
+</footer>
+
+<script>
+// ── Chart setup ──────────────────────────────────────────────────────────────
+const MAXPTS = 80;
+
+const accCtx = document.getElementById('acc-chart').getContext('2d');
+const accChart = new Chart(accCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Accuracy',
+      data: [],
+      borderColor: '#00ff88',
+      backgroundColor: 'rgba(0,255,136,.08)',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: 0.4,
+      fill: true,
+    }]
+  },
+  options: {
+    animation: false,
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { display: false },
+      y: {
+        min: 0, max: 1,
+        grid: { color: '#1a2830' },
+        ticks: { color: '#4a6878', font: { family: 'Share Tech Mono', size: 10 },
+                 callback: v => (v*100).toFixed(0)+'%' }
+      }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+
+const snrCtx = document.getElementById('snr-chart').getContext('2d');
+const snrChart = new Chart(snrCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'SNR (dB)',
+        data: [],
+        borderColor: '#00aaff',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        yAxisID: 'y',
+      },
+      {
+        label: 'Confidence',
+        data: [],
+        borderColor: '#ffb800',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        yAxisID: 'y2',
+      }
+    ]
+  },
+  options: {
+    animation: false,
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { display: false },
+      y: {
+        position: 'left',
+        grid: { color: '#1a2830' },
+        ticks: { color: '#4a6878', font: { family: 'Share Tech Mono', size: 10 },
+                 callback: v => v.toFixed(0)+'dB' }
+      },
+      y2: {
+        position: 'right',
+        min: 0, max: 1,
+        grid: { display: false },
+        ticks: { color: '#4a6878', font: { family: 'Share Tech Mono', size: 10 },
+                 callback: v => (v*100).toFixed(0)+'%' }
+      }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+
+function pushChart(chart, label, ...vals) {
+  chart.data.labels.push(label);
+  vals.forEach((v, i) => chart.data.datasets[i].data.push(v));
+  if (chart.data.labels.length > MAXPTS) {
+    chart.data.labels.shift();
+    chart.data.datasets.forEach(d => d.data.shift());
+  }
+  chart.update('none');
+}
+
+// ── Class colours ─────────────────────────────────────────────────────────────
+const CLS_COLOR = { signal: 'sig', noise: 'noi', multi: 'mul' };
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let total = 0, correct = 0;
+const classCounts = { signal: 0, noise: 0, multi: 0 };
+const cm = {};
+['signal','noise','multi'].forEach(r =>
+  ['signal','noise','multi'].forEach(c => cm[`${r[0]}${c[0]}`] = 0));
+
+// ── Accuracy display ──────────────────────────────────────────────────────────
+function updateAcc() {
+  const acc = total ? correct / total : 0;
+  const pct = (acc * 100).toFixed(1) + '%';
+  const el  = document.getElementById('acc-val');
+  el.textContent = pct;
+  el.className   = 'big-stat' + (acc >= 0.85 ? '' : acc >= 0.70 ? ' warn' : ' bad');
+  document.getElementById('acc-sub').textContent = `${correct} / ${total} predictions`;
+  const bar = document.getElementById('acc-bar');
+  bar.style.width = pct;
+  bar.style.background = acc >= 0.85 ? 'var(--signal)' : acc >= 0.70 ? 'var(--noise)' : 'var(--danger)';
+}
+
+function updateClassBars() {
+  ['signal','noise','multi'].forEach(cls => {
+    const pct = total ? (classCounts[cls] / total * 100).toFixed(1) : 0;
+    document.getElementById(`bar-${cls}`).style.width = pct + '%';
+    document.getElementById(`cnt-${cls}`).textContent  = classCounts[cls];
+  });
+}
+
+function updateCM(tc, pc) {
+  const key = `cm-${tc[0]}${pc[0]}`;
+  const el  = document.getElementById(key);
+  if (!el) return;
+  cm[`${tc[0]}${pc[0]}`]++;
+  el.textContent = cm[`${tc[0]}${pc[0]}`];
+  el.className   = tc === pc ? 'cm-diag' : 'cm-off';
+}
+
+// ── Feed ──────────────────────────────────────────────────────────────────────
+const feed = document.getElementById('feed');
+function addFeedRow(d) {
+  const ok      = d.correct;
+  const ccls    = CLS_COLOR[d.true_class]  || '';
+  const pcls    = CLS_COLOR[d.predicted]   || '';
+  const conf    = d.confidence != null ? d.confidence : null;
+  const confPct = conf != null ? (conf * 100).toFixed(0) + '%' : 'n/a';
+  const snr     = d.snr_db != null ? (d.snr_db > 0 ? '+' : '') + d.snr_db.toFixed(1) : '—';
+  const confW   = conf != null ? (conf * 100).toFixed(1) + '%' : '0%';
+
+  const row = document.createElement('div');
+  row.className = `feed-row ${ok ? 'correct' : 'wrong'}`;
+  row.innerHTML = `
+    <span class="dim">${d.id}</span>
+    <span class="${ccls}">${d.true_class}</span>
+    <span class="${pcls}">${d.predicted}</span>
+    <span class="${ok ? 'good' : 'bad'}">${ok ? 'CORRECT' : 'WRONG'}</span>
+    <span class="dim">${confPct}</span>
+    <span class="snr-val ${d.snr_db > 10 ? 'good' : d.snr_db > 5 ? '' : 'bad'}">${snr}</span>
+    <div style="display:flex;align-items:center;gap:6px;width:100%">
+      <div class="conf-bar-inline"><div class="conf-fill" style="width:${confW}"></div></div>
+    </div>
+  `;
+  feed.prepend(row);
+  // Keep max 40 rows visible
+  while (feed.children.length > 40) feed.removeChild(feed.lastChild);
+}
+
+// ── SSE connection ────────────────────────────────────────────────────────────
+let es;
+function connect() {
+  es = new EventSource('/stream');
+  const dot  = document.getElementById('dot');
+  const text = document.getElementById('conn-text');
+
+  es.onopen = () => {
+    dot.className  = 'dot live';
+    text.textContent = 'LIVE';
+    fetchStats();
+  };
+
+  es.onmessage = e => {
+    const d = JSON.parse(e.data);
+    document.getElementById('ft-time').textContent = new Date().toLocaleTimeString();
+
+    if (d.type === 'reset') {
+      total = correct = 0;
+      Object.keys(classCounts).forEach(k => classCounts[k] = 0);
+      Object.keys(cm).forEach(k => cm[k] = 0);
+      ['ss','sn','sm','ns','nn','nm','ms','mn','mm'].forEach(k => {
+        const el = document.getElementById('cm-' + k);
+        if (el) { el.textContent = '0'; el.className = 'cm-zero'; }
+      });
+      accChart.data.labels = []; accChart.data.datasets[0].data = []; accChart.update('none');
+      snrChart.data.labels = []; snrChart.data.datasets.forEach(d => d.data = []); snrChart.update('none');
+      feed.innerHTML = '';
+      updateAcc(); updateClassBars();
+      return;
+    }
+
+    if (d.type !== 'prediction') return;
+
+    total++;
+    if (d.correct) correct++;
+    if (classCounts[d.true_class] !== undefined) classCounts[d.true_class]++;
+    updateAcc();
+    updateClassBars();
+    updateCM(d.true_class, d.predicted);
+    addFeedRow(d);
+    pushChart(accChart, d.id, d.accuracy);
+    pushChart(snrChart, d.id, d.snr_db, d.confidence);
+
+    document.getElementById('mode-badge').textContent =
+      `TOTAL: ${total}`;
+  };
+
+  es.onerror = () => {
+    dot.className  = 'dot dead';
+    text.textContent = 'DISCONNECTED';
+    setTimeout(connect, 3000);
+  };
+}
+
+// ── Fetch stats on load ───────────────────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const s = await r.json();
+    document.getElementById('snr-avg').textContent  = s.snr_avg  ? s.snr_avg.toFixed(1)+'dB' : '—';
+    document.getElementById('conf-avg').textContent = s.conf_avg ? (s.conf_avg*100).toFixed(0)+'%' : '—';
+    document.getElementById('low-conf').textContent = s.low_conf ?? '—';
+    document.getElementById('total-cnt').textContent = s.total ?? 0;
+    document.getElementById('ft-subs').textContent  = s.subscribers ?? '—';
+    document.getElementById('ft-url').textContent   = window.location.host;
+  } catch {}
+  setTimeout(fetchStats, 5000);
+}
+
+async function resetStats() {
+  await fetch('/api/reset', { method: 'POST' });
+}
+
+connect();
+</script>
+</body>
+</html>
